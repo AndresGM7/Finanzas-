@@ -1,0 +1,76 @@
+Se utiliza la libreria de yahoo finance yfinance para aextraer el precio de cierre de las criptomonedas
+Se construye un portafolio simulado, se calculan los rendimientos, se localizan los puntos de mayor rentabilidad y menor volatilidad utilizando el sharpe ratio.
+
+
+import ccxt
+import pandas_ta as ta
+import numpy as np
+
+import pandas as pd
+import time
+import requests
+import yfinance as yf
+from matplotlib import pyplot as plt
+
+
+#Parametros Simulacion
+n_portfolios=10**5
+n_days=252
+assets=['BTC-USD','ETH-USD','XRP-USD','LTC-USD','BHC-USD']
+start='2020-01-01'
+end='2022-12-31'
+n_assets=len(assets)
+#Descargar informacion diaria con yfinance
+prices_df=yf.download(assets,start=start,end=end)['Adj Close']
+
+
+##Markowitz
+#Calculo rendimientos promedio anualizados y desviaciones
+returns_df=prices_df.pct_change()
+avr_returns= returns_df.mean()*n_days
+cov_mat=returns_df.cov()*n_days
+#Convinaciones aleatorias de ponderaciones
+np.random.seed(42)
+weights=np.random.random(size=(n_portfolios, n_assets))
+weights/=np.sum(weights,axis=1)[:,np.newaxis]
+
+#calcular metricas portafolio
+port_returns=np.dot(weights, avr_returns)
+port_vol=[]
+for i in range(0,len(weights)):
+    port_vol.append(np.sqrt(np.dot(weights[i].T,np.dot(cov_mat,weights[i]))))
+port_vol=np.array(port_vol)
+port_sharpe=port_returns/port_vol
+
+#Crear un df con todos los datos
+port_results=pd.DataFrame({'returns': port_returns, 'volatility':port_vol,'sharpe_ratio':port_sharpe})
+
+
+#Localizar los puntos para la frontera eficiente
+n_points=100
+port_vol_ef=[]
+indices_to_skip=[]
+port_returns_ef=np.linspace(port_results.returns.min(),port_results.returns.max(),n_points)
+port_returns_ef=np.round(port_returns_ef,2)
+
+for point_index in range(n_points):
+    if port_returns_ef[point_index] not in port_returns:
+        indices_to_skip.append(point_index)
+        continue
+    matched_ind=np.where(port_returns==port_returns_ef[point_index])
+    port_vol_ef.append(np.min(port_vol[matched_ind]))
+port_returns_ef=np.delete(port_returns_ef, indices_to_skip)
+
+
+#Graficar frontera eficiente
+MARKS=['o','X','d','*','2']
+fig, ax=plt.subplots()
+port_results.plot(kind='scatter', x='volatility',y='returns',c='sharpe_ratio',cmap='RdYlGn',edgecolor='black',ax=ax)
+ax.set(xlabel='volatility',ylabel='Expected Returns',title='Efficient Frontier')
+ax.plot(port_vol_ef,port_returns_ef,'b--')
+
+for asset_index in range(n_assets):
+    ax.scatter(x=np.sqrt(cov_mat.iloc[asset_index,asset_index]), y=avr_returns[asset_index],marker=MARKS[asset_index],s=150,color='black', label=assets[asset_index])
+ax.legend()
+
+
